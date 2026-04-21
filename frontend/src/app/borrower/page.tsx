@@ -227,7 +227,7 @@ export default function BorrowerPage() {
 
             <button
               onClick={handleGrantApproval}
-              disabled={!hasData}
+              disabled={!hasData && submitStatus !== 'done'}
               className="w-full border border-brand-600 hover:bg-brand-900 disabled:opacity-40 text-brand-400 font-semibold py-3 rounded-xl transition-colors"
             >
               Grant Encrypted Approval

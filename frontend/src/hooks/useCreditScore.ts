@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { useAccount, useChainId, useReadContract, useWriteContract } from 'wagmi'
+import { useAccount, useChainId, usePublicClient, useReadContract, useWriteContract } from 'wagmi'
 import { parseEventLogs } from 'viem'
 import { CreditScoreRegistryABI } from '@/abis/CreditScoreRegistry'
 import { CONTRACT_ADDRESSES, MIN_CREDIT_THRESHOLD } from '@/config'
@@ -26,6 +26,7 @@ export function useCreditScore() {
 
   const { encryptUint32s, decryptUint32, status: cofheStatus } = useCofhe()
   const { writeContractAsync } = useWriteContract()
+  const publicClient = usePublicClient()
 
   const [submitStatus, setSubmitStatus] = useState<SubmitStatus>('idle')
   const [scoreStatus,  setScoreStatus]  = useState<ScoreStatus>('idle')
@@ -77,6 +78,7 @@ export function useCreditScore() {
       })
 
       setTxHash(hash)
+      if (publicClient) await publicClient.waitForTransactionReceipt({ hash })
       setSubmitStatus('done')
       await refetchHasData()
     } catch (e) {
