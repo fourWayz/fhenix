@@ -32,7 +32,16 @@ const config: HardhatUserConfig = {
       timeout: 60000,
       httpHeaders: {},
     },
-  },
+  // Arbitrum Sepolia testnet configuration
+		'arb-sepolia': {
+			url: process.env.ARBITRUM_SEPOLIA_RPC_URL || 'https://sepolia-rollup.arbitrum.io/rpc',
+			accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+			chainId: 421614,
+			gasMultiplier: 1.2,
+			timeout: 60000,
+			httpHeaders: {},
+		},
+	},
 
   etherscan: {
     apiKey: {
