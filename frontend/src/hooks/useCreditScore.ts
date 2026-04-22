@@ -115,6 +115,18 @@ export function useCreditScore() {
     }
   }, [addr, cofheStatus, writeContractAsync])
 
+  // ── Gas helper: fetch live fees + 30% buffer to avoid base-fee race ─────────
+
+  const gasFees = useCallback(async () => {
+    if (!publicClient) return {}
+    const fees = await publicClient.estimateFeesPerGas()
+    const bump = (v: bigint) => (v * BigInt(130)) / BigInt(100) // +30% buffer
+    return {
+      maxFeePerGas:         bump(fees.maxFeePerGas         ?? BigInt(0)),
+      maxPriorityFeePerGas: bump(fees.maxPriorityFeePerGas ?? BigInt(0)),
+    }
+  }, [publicClient])
+
   // ── Grant lender approval ───────────────────────────────────────────────────
 
   const grantLenderApproval = useCallback(async (
@@ -127,9 +139,10 @@ export function useCreditScore() {
       abi:     CreditScoreRegistryABI,
       functionName: 'grantLenderApproval',
       args: [lender, threshold],
+      ...(await gasFees()),
     })
     return hash
-  }, [addr, writeContractAsync])
+  }, [addr, writeContractAsync, gasFees])
 
   const allowApprovalPublic = useCallback(async (lender: `0x${string}`) => {
     if (!addr) throw new Error('Contract not deployed on this chain')
@@ -138,8 +151,9 @@ export function useCreditScore() {
       abi:     CreditScoreRegistryABI,
       functionName: 'allowApprovalPublic',
       args: [lender],
+      ...(await gasFees()),
     })
-  }, [addr, writeContractAsync])
+  }, [addr, writeContractAsync, gasFees])
 
   // ── Preview score (client-side, no gas) ────────────────────────────────────
 
