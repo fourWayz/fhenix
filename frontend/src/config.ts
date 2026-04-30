@@ -1,20 +1,22 @@
 import { arbitrumSepolia, baseSepolia } from 'wagmi/chains'
 
-// ── Contract addresses (replace after running `pnpm deploy-credit`) ──────────
-export const CONTRACT_ADDRESSES: Record<number, { registry: `0x${string}`; pool: `0x${string}` }> = {
+type Addresses = { registry: `0x${string}`; pool: `0x${string}`; nft: `0x${string}` }
+
+export const CONTRACT_ADDRESSES: Record<number, Addresses> = {
   // Arbitrum Sepolia (chainId 421614)
   [arbitrumSepolia.id]: {
-    registry: '0xfbf61a33ab9eA16D7191d68298D0298B6e62b61c',
-    pool:     '0xAc5Ee2Aff86732530Ee83B7448bcDAd82811aCF0',
+    registry: '0xDe6615E28a8F413Dd2728a3A0156bF7efF2A974C',
+    pool:     '0x099f850Cbb05b45E83DA34ED93855fdF88260991',
+    nft:      '0x3Eed4f826CBF1FE513EcC1369CCfd2388A668697', // set after redeploy
   },
   // Base Sepolia (chainId 84532)
   [baseSepolia.id]: {
     registry: '0x0000000000000000000000000000000000000000',
     pool:     '0x0000000000000000000000000000000000000000',
+    nft:      '0x0000000000000000000000000000000000000000',
   },
 }
 
 export const SUPPORTED_CHAINS = [arbitrumSepolia, baseSepolia] as const
 
-// Minimum credit score required for reduced collateral (70% of max 10 000)
 export const MIN_CREDIT_THRESHOLD = 7_000

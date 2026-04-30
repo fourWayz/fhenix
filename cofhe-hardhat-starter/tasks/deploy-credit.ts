@@ -2,7 +2,7 @@ import { task } from 'hardhat/config'
 import { HardhatRuntimeEnvironment } from 'hardhat/types'
 import { saveDeployment } from './utils'
 
-task('deploy-credit', 'Deploy CreditScoreRegistry and LendingPool').setAction(
+task('deploy-credit', 'Deploy CreditScoreRegistry, LendingPool, and CreditTierNFT').setAction(
   async (_, hre: HardhatRuntimeEnvironment) => {
     const { ethers, network } = hre
 
@@ -10,7 +10,7 @@ task('deploy-credit', 'Deploy CreditScoreRegistry and LendingPool').setAction(
     const [deployer] = await ethers.getSigners()
     console.log(`Deploying with account: ${deployer.address}`)
 
-    // 1. CreditScoreRegistry
+    // CreditScoreRegistry
     const Registry = await ethers.getContractFactory('CreditScoreRegistry')
     const registry = await Registry.deploy()
     await registry.waitForDeployment()
@@ -18,7 +18,7 @@ task('deploy-credit', 'Deploy CreditScoreRegistry and LendingPool').setAction(
     console.log(`CreditScoreRegistry deployed to: ${registryAddress}`)
     saveDeployment(network.name, 'CreditScoreRegistry', registryAddress)
 
-    // 2. LendingPool (depends on registry address)
+    // LendingPool (depends on registry)
     const Pool = await ethers.getContractFactory('LendingPool')
     const pool = await Pool.deploy(registryAddress)
     await pool.waitForDeployment()
@@ -26,6 +26,17 @@ task('deploy-credit', 'Deploy CreditScoreRegistry and LendingPool').setAction(
     console.log(`LendingPool deployed to: ${poolAddress}`)
     saveDeployment(network.name, 'LendingPool', poolAddress)
 
-    return { registryAddress, poolAddress }
+    // CreditTierNFT (depends on registry — reads revealed rates)
+    const NFT = await ethers.getContractFactory('CreditTierNFT')
+    const nft = await NFT.deploy(registryAddress)
+    await nft.waitForDeployment()
+    const nftAddress = await nft.getAddress()
+    console.log(`CreditTierNFT deployed to: ${nftAddress}`)
+    saveDeployment(network.name, 'CreditTierNFT', nftAddress)
+
+    console.log('\n--- Deployment summary ---')
+    console.log(JSON.stringify({ CreditScoreRegistry: registryAddress, LendingPool: poolAddress, CreditTierNFT: nftAddress }, null, 2))
+
+    return { registryAddress, poolAddress, nftAddress }
   },
 )
