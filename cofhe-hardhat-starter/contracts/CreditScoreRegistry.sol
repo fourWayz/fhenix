@@ -6,21 +6,6 @@ import "@fhenixprotocol/cofhe-contracts/FHE.sol";
 /**
  * @title CreditScoreRegistry
  * @notice Privacy-preserving on-chain credit scoring using Fully Homomorphic Encryption.
- *
- * Users submit four encrypted financial signals (each normalised 0-100).
- * The contract computes a weighted score entirely in FHE — the numeric value is
- * never revealed unless the user explicitly requests decryption.
- *
- * Lenders receive only an encrypted pass/fail ebool; they learn nothing about
- * the underlying financial data or the numeric score.
- *
- * Score formula  (max = 10 000):
- *   score = balance*25 + txFrequency*20 + repaymentHistory*40 + (100-debtRatio)*15
- *
- * Dynamic rate formula (all FHE, no on-chain division):
- *   rateScaled = BASE_RATE_SCALED - safeExcess * DISCOUNT_NUM
- *   rateBps    = rateScaled / RATE_SCALE   (done off-chain at reveal time)
- *   Range: 15.00% (score=7000) → 8.00% (score=10000)
  */
 contract CreditScoreRegistry {
 
