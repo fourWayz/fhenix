@@ -6,6 +6,21 @@ import "@fhenixprotocol/cofhe-contracts/FHE.sol";
 /**
  * @title CreditScoreRegistry
  * @notice Privacy-preserving on-chain credit scoring using Fully Homomorphic Encryption.
+ *
+ * Users submit four encrypted financial signals (each normalised 0-100).
+ * The contract computes a weighted score entirely in FHE — the numeric value is
+ * never revealed unless the user explicitly requests decryption.
+ *
+ * Lenders receive only an encrypted pass/fail ebool; they learn nothing about
+ * the underlying financial data or the numeric score.
+ *
+ * Score formula  (max = 10 000):
+ *   score = balance*25 + txFrequency*20 + repaymentHistory*40 + (100-debtRatio)*15
+ *
+ * Dynamic rate formula (all FHE, no on-chain division):
+ *   rateScaled = BASE_RATE_SCALED - safeExcess * DISCOUNT_NUM
+ *   rateBps    = rateScaled / RATE_SCALE   (done off-chain at reveal time)
+ *   Range: 15.00% (score=7000) → 8.00% (score=10000)
  */
 contract CreditScoreRegistry {
 
@@ -213,15 +228,29 @@ contract CreditScoreRegistry {
         emit PersonalRateComputed(msg.sender);
     }
 
-    /** @notice Step 2 of rate reveal: permit public decryption. */
+    /** @notice Step 2 of rate reveal: permit public decryption by the CoFHE oracle. */
     function allowRatePublic() external {
         require(_rateValid[msg.sender], "CreditScoreRegistry: no rate computed");
         FHE.allowPublic(_encRates[msg.sender]);
     }
 
     /**
-     * @notice Step 3 of rate reveal: submit CoFHE threshold-network signature.
-     *         Divides rateScaled by RATE_SCALE to store final bps value.
+     * @notice Step 3 (oracle path): after allowRatePublic() the CoFHE oracle automatically
+     *         writes the decrypted value into the FHE precompile state. Call this once the
+     *         oracle has processed it to copy the result into contract storage.
+     *         Reverts with "rate not yet decrypted by oracle" if called too early — retry.
+     */
+    function syncRateFromOracle() external {
+        require(_rateValid[msg.sender], "CreditScoreRegistry: no rate computed");
+        (uint32 rateScaled, bool decrypted) = FHE.getDecryptResultSafe(_encRates[msg.sender]);
+        require(decrypted, "CreditScoreRegistry: rate not yet decrypted by oracle - wait and retry");
+        _revealedRates[msg.sender] = rateScaled / RATE_SCALE;
+        _rateRevealed[msg.sender]  = true;
+        emit PersonalRateRevealed(msg.sender, _revealedRates[msg.sender]);
+    }
+
+    /**
+     * @notice Step 3 (SDK path, kept for compatibility): submit CoFHE threshold-network signature.
      */
     function publishRateResult(
         address        borrower,

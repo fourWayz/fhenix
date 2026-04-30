@@ -5,24 +5,14 @@ import "./CreditScoreRegistry.sol";
 
 /**
  * @title LendingPool
- * @notice Under-collateralised lending pool powered by FHE credit scores.
- *
- * Standard borrowers pay 150 % collateral.
- * Credit-approved borrowers pay only 110 % — a 40-point saving unlocked by
- * a privacy-preserving score the pool never sees in plaintext.
- *
- * Full credit-check flow (3-step on-chain reveal):
- *   1. Borrower: registry.grantLenderApproval(pool, threshold)
- *   2. Borrower: registry.allowApprovalPublic(pool)
- *   3. Keeper / CoFHE SDK: registry.publishApprovalResult(borrower, pool, value, sig)
- *   4. Borrower: pool.requestLoan(amount, true)  — pool reads revealed result
  */
 contract LendingPool {
     CreditScoreRegistry public immutable registry;
 
-    uint256 public constant STANDARD_RATIO    = 150;  // % collateral, no credit
-    uint256 public constant CREDIT_RATIO      = 110;  // % collateral, credit-approved
-    uint32  public constant MIN_CREDIT_THRESHOLD = 7_000; // out of 10 000
+    uint256 public constant STANDARD_RATIO       = 150;    // % collateral, no credit
+    uint256 public constant CREDIT_RATIO         = 110;    // % collateral, credit-approved
+    uint32  public constant MIN_CREDIT_THRESHOLD = 7_000;  // out of 10 000
+    uint32  public constant BASE_RATE_BPS        = 1_500;  // 15.00 % APR (standard)
 
     struct Loan {
         uint256 principal;
@@ -30,6 +20,7 @@ contract LendingPool {
         bool    creditApproved;
         bool    active;
         uint256 issuedAt;
+        uint32  interestRateBps; // annual rate in basis points (e.g. 1200 = 12.00 %)
     }
 
     mapping(address => Loan)    public loans;
@@ -42,8 +33,8 @@ contract LendingPool {
 
     event Deposited(address indexed provider, uint256 amount);
     event Withdrawn(address indexed provider, uint256 amount);
-    event LoanIssued(address indexed borrower, uint256 principal, bool creditApproved, uint256 collateral);
-    event LoanRepaid(address indexed borrower, uint256 principal);
+    event LoanIssued(address indexed borrower, uint256 principal, bool creditApproved, uint256 collateral, uint32 interestRateBps);
+    event LoanRepaid(address indexed borrower, uint256 principal, uint256 interest);
 
     constructor(address _registry) {
         registry = CreditScoreRegistry(_registry);
@@ -74,13 +65,10 @@ contract LendingPool {
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * @notice Request a loan. Supply at least `collateralRequired()` ETH.
+     * @notice Request a loan. Supply at least `collateralRequired()` ETH as msg.value.
      *
-     * When `useCredit = true` the pool reads the on-chain-revealed approval from
-     * the registry (must complete the 3-step reveal flow first).
-     *
-     * @param principal  Amount to borrow in wei
-     * @param useCredit  Whether to use the FHE credit approval
+     * When useCredit=true: requires both on-chain approval reveal AND rate reveal
+     * from the registry (full 6-step credit flow above).
      */
     function requestLoan(uint256 principal, bool useCredit) external payable {
         require(principal > 0,             "LendingPool: zero principal");
@@ -88,60 +76,92 @@ contract LendingPool {
         require(availableLiquidity() >= principal, "LendingPool: insufficient liquidity");
 
         uint256 ratio;
+        uint32  rateBps;
 
         if (useCredit) {
-            // Verify the on-chain revealed approval (from 3-step FHE decrypt flow)
             bool approved = registry.getRevealedApproval(msg.sender, address(this));
             require(approved, "LendingPool: credit score below threshold");
 
-            // Ensure the borrower used a threshold meeting the pool minimum
             uint32 usedThreshold = registry.getApprovalThreshold(msg.sender, address(this));
             require(
                 usedThreshold >= MIN_CREDIT_THRESHOLD,
                 "LendingPool: approval threshold too low"
             );
 
-            ratio = CREDIT_RATIO;
+            require(registry.isRateRevealed(msg.sender), "LendingPool: personal rate not revealed - complete credit flow first");
+            rateBps = registry.getRevealedRate(msg.sender);
+            ratio   = CREDIT_RATIO;
         } else {
-            ratio = STANDARD_RATIO;
+            rateBps = BASE_RATE_BPS;
+            ratio   = STANDARD_RATIO;
         }
 
         uint256 required = (principal * ratio) / 100;
         require(msg.value >= required, "LendingPool: insufficient collateral");
 
         loans[msg.sender] = Loan({
-            principal:     principal,
-            collateral:    msg.value,
-            creditApproved: useCredit,
-            active:        true,
-            issuedAt:      block.timestamp
+            principal:       principal,
+            collateral:      msg.value,
+            creditApproved:  useCredit,
+            active:          true,
+            issuedAt:        block.timestamp,
+            interestRateBps: rateBps
         });
 
         totalBorrowed += principal;
         payable(msg.sender).transfer(principal);
 
-        emit LoanIssued(msg.sender, principal, useCredit, msg.value);
+        emit LoanIssued(msg.sender, principal, useCredit, msg.value, rateBps);
     }
 
     /**
-     * @notice Repay the active loan in full and reclaim collateral.
+     * @notice Repay the active loan in full (principal + accrued interest).
+     *         Send at least `totalRepaymentDue(msg.sender)` as msg.value.
+     *         Any overpayment is refunded. Collateral is returned on repayment.
      */
     function repayLoan() external payable {
         Loan storage loan = loans[msg.sender];
-        require(loan.active,               "LendingPool: no active loan");
-        require(msg.value >= loan.principal, "LendingPool: repayment too low");
+        require(loan.active, "LendingPool: no active loan");
 
+        uint256 interest = getAccruedInterest(msg.sender);
+        uint256 totalDue = loan.principal + interest;
+        require(msg.value >= totalDue, "LendingPool: send principal + accrued interest");
+
+        uint256 principal  = loan.principal;
         uint256 collateral = loan.collateral;
-        totalBorrowed     -= loan.principal;
+        totalBorrowed -= principal;
         delete loans[msg.sender];
 
+        // Refund any overpayment
+        if (msg.value > totalDue) {
+            payable(msg.sender).transfer(msg.value - totalDue);
+        }
         payable(msg.sender).transfer(collateral);
-        emit LoanRepaid(msg.sender, msg.value);
+
+        emit LoanRepaid(msg.sender, principal, interest);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Views
     // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * @notice Accrued interest for an active loan.
+     *         interest = principal × rateBps × elapsed / (10_000 × 365 days)
+     */
+    function getAccruedInterest(address borrower) public view returns (uint256) {
+        Loan storage loan = loans[borrower];
+        if (!loan.active) return 0;
+        uint256 elapsed = block.timestamp - loan.issuedAt;
+        return (loan.principal * loan.interestRateBps * elapsed) / (10_000 * 365 days);
+    }
+
+    /** @notice Total amount (principal + interest) required to repay right now. */
+    function totalRepaymentDue(address borrower) external view returns (uint256) {
+        Loan storage loan = loans[borrower];
+        if (!loan.active) return 0;
+        return loan.principal + getAccruedInterest(borrower);
+    }
 
     function availableLiquidity() public view returns (uint256) {
         uint256 bal = address(this).balance;
@@ -152,11 +172,6 @@ contract LendingPool {
         return address(this).balance;
     }
 
-    /**
-     * @notice Preview how much collateral a borrower needs.
-     * @param principal  Intended borrow amount in wei
-     * @param useCredit  Whether the borrower intends to use credit approval
-     */
     function collateralRequired(uint256 principal, bool useCredit)
         external
         pure
