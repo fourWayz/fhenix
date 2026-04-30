@@ -244,7 +244,7 @@ contract CreditScoreRegistry {
         bytes calldata signature
     ) external {
         require(_rateValid[borrower], "CreditScoreRegistry: no rate computed");
-        FHE.publishDecryptResult(_encRates[borrower], rateScaled, signature);
+        FHE.publishDecryptResult(_encRates[borrower], uint32(rateScaled), signature);
         _revealedRates[borrower] = uint32(rateScaled / RATE_SCALE);
         _rateRevealed[borrower]  = true;
         emit PersonalRateRevealed(borrower, _revealedRates[borrower]);
@@ -272,7 +272,7 @@ contract CreditScoreRegistry {
         returns (bool approved)
     {
         require(_approvalSet[borrower][lender], "CreditScoreRegistry: no approval set");
-        (uint256 value, bool decrypted) = FHE.getDecryptResultSafe(_approvals[borrower][lender]);
+        (uint32 value, bool decrypted) = FHE.getDecryptResultSafe(_approvals[borrower][lender]);
         require(decrypted, "CreditScoreRegistry: approval not yet revealed on-chain");
         return value == 1;
     }
