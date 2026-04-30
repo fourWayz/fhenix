@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
-// createCofheConfig / createCofheClient live in the /web entry (browser build with IndexedDB + workers)
 import { createCofheConfig, createCofheClient } from '@cofhe/sdk/web'
 import { Encryptable, FheTypes } from '@cofhe/sdk'
 import type { CofheClient } from '@cofhe/sdk'
@@ -64,7 +63,7 @@ export function useCofhe() {
     [client],
   )
 
-  // Decrypt a single euint32 handle — returns the plaintext bigint
+  // Decrypt a single euint32 handle (view — requires permit)
   const decryptUint32 = useCallback(
     async (handle: bigint) => {
       if (!client) throw new Error('CoFHE client not ready')
@@ -73,5 +72,14 @@ export function useCofhe() {
     [client],
   )
 
-  return { client, status, error, encryptUint32s, decryptUint32 }
+  // Decrypt a handle for a tx — returns plaintext + threshold-network signature
+  const decryptForTx = useCallback(
+    async (handle: bigint) => {
+      if (!client) throw new Error('CoFHE client not ready')
+      return client.decryptForTx(handle).withoutPermit().execute()
+    },
+    [client],
+  )
+
+  return { client, status, error, encryptUint32s, decryptUint32, decryptForTx }
 }
