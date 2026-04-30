@@ -16,6 +16,11 @@ import "@fhenixprotocol/cofhe-contracts/FHE.sol";
  *
  * Score formula  (max = 10 000):
  *   score = balance*25 + txFrequency*20 + repaymentHistory*40 + (100-debtRatio)*15
+ *
+ * Dynamic rate formula (all FHE, no on-chain division):
+ *   rateScaled = BASE_RATE_SCALED - safeExcess * DISCOUNT_NUM
+ *   rateBps    = rateScaled / RATE_SCALE   (done off-chain at reveal time)
+ *   Range: 15.00% (score=7000) → 8.00% (score=10000)
  */
 contract CreditScoreRegistry {
 
@@ -30,14 +35,31 @@ contract CreditScoreRegistry {
         uint256 updatedAt;
     }
 
-    // ─── Weights (must sum to 100) ────────────────────────────────────────────
+    // ─── Score weights (must sum to 100) ─────────────────────────────────────
 
     uint32 public constant W_BALANCE    = 25;
     uint32 public constant W_TX_FREQ    = 20;
     uint32 public constant W_REPAYMENT  = 40;
     uint32 public constant W_DEBT       = 15;  // applied to (100 - debtRatio)
-
     uint32 public constant MAX_SCORE    = 10_000;
+
+    // ─── Dynamic rate constants ───────────────────────────────────────────────
+    // To avoid FHE division, rates are stored scaled by RATE_SCALE.
+    // The divisor is applied at reveal time (off-chain).
+    //
+    //   rateScaled = BASE_RATE_SCALED - (score - threshold) * DISCOUNT_NUM
+    //   rateBps    = rateScaled / RATE_SCALE
+    //
+    // At score=7000: 45000 / 30 = 1500 bps = 15.00%
+    // At score=10000: (45000 - 3000*7) / 30 = 24000 / 30 = 800 bps = 8.00%
+
+    uint32 public constant BASE_RATE_BPS    = 1_500;   // 15.00% — standard / floor rate
+    uint32 public constant MIN_RATE_BPS     =   800;   // 8.00%  — best possible rate
+    uint32 public constant RATE_SCALE       =    30;   // scaling factor
+    uint32 public constant BASE_RATE_SCALED = 45_000;  // BASE_RATE_BPS * RATE_SCALE
+    uint32 public constant DISCOUNT_NUM     =     7;   // 7 scaled-bps per score point
+
+    uint32 public constant MIN_CREDIT_THRESHOLD = 7_000;
 
     // ─── State ────────────────────────────────────────────────────────────────
 
@@ -48,14 +70,21 @@ contract CreditScoreRegistry {
     // borrower => lender => encrypted approval result (euint32: 0=denied, 1=approved)
     mapping(address => mapping(address => euint32)) private _approvals;
     mapping(address => mapping(address => bool))    private _approvalSet;
-    // minimum score the borrower used when granting the approval
     mapping(address => mapping(address => uint32))  private _approvalThresholds;
+
+    // Dynamic rate — encrypted and revealed per borrower
+    mapping(address => euint32) private _encRates;
+    mapping(address => bool)    private _rateValid;
+    mapping(address => uint32)  private _revealedRates; // final rate in bps after reveal
+    mapping(address => bool)    private _rateRevealed;
 
     // ─── Events ───────────────────────────────────────────────────────────────
 
     event CreditDataSubmitted(address indexed borrower, uint256 timestamp);
     event ScoreComputed(address indexed borrower);
     event LenderApprovalGranted(address indexed borrower, address indexed lender, uint32 threshold);
+    event PersonalRateComputed(address indexed borrower);
+    event PersonalRateRevealed(address indexed borrower, uint32 rateBps);
 
     // ─── Modifiers ────────────────────────────────────────────────────────────
 
@@ -65,15 +94,11 @@ contract CreditScoreRegistry {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Borrower actions
+    //  Borrower actions — credit data
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * @notice Submit encrypted financial signals. All values normalised to 0-100.
-     * @param balance      Portfolio / wallet balance score   (higher = better)
-     * @param txFreq       On-chain transaction activity      (higher = better)
-     * @param repayment    Historical repayment reliability   (higher = better)
-     * @param debtRatio    Current debt burden                (lower  = better)
      */
     function submitCreditData(
         InEuint32 calldata balance,
@@ -90,25 +115,23 @@ contract CreditScoreRegistry {
         d.hasData      = true;
         d.updatedAt    = block.timestamp;
 
-        // Contract needs access to compute score later
         FHE.allowThis(d.encBalance);
         FHE.allowThis(d.encTxFreq);
         FHE.allowThis(d.encRepayment);
         FHE.allowThis(d.encDebtRatio);
 
-        // Borrower can decrypt their own inputs
         FHE.allowSender(d.encBalance);
         FHE.allowSender(d.encTxFreq);
         FHE.allowSender(d.encRepayment);
         FHE.allowSender(d.encDebtRatio);
 
-        _scoreValid[msg.sender] = false; // invalidate cached score
+        _scoreValid[msg.sender] = false;
+        _rateValid[msg.sender]  = false; // invalidate cached rate too
         emit CreditDataSubmitted(msg.sender, block.timestamp);
     }
 
     /**
      * @notice Compute and return caller's encrypted score.
-     * Decrypt via CoFHE SDK using the caller's permit — numeric value stays private.
      */
     function getMyScore()
         external
@@ -118,19 +141,17 @@ contract CreditScoreRegistry {
         euint32 score = _scoreValid[msg.sender]
             ? _scores[msg.sender]
             : _recomputeScore(msg.sender);
-
         FHE.allowSender(score);
         return score;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Borrower actions — lender approval (pass/fail)
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * @notice Grant a specific lender an encrypted pass/fail approval.
-     *
-     * Computes `approved = (score >= threshold)` in FHE.
-     * The lender can decrypt only the boolean result — they never learn the score.
-     *
-     * @param lender    Address authorised to decrypt the approval
-     * @param threshold Minimum score out of 10 000 (e.g. 7000 = 70 %)
+     * @notice Grant a lender an encrypted pass/fail approval.
+     *         The lender sees only 0 or 1 — never the underlying score.
      */
     function grantLenderApproval(address lender, uint32 threshold)
         external
@@ -140,42 +161,31 @@ contract CreditScoreRegistry {
             ? _scores[msg.sender]
             : _recomputeScore(msg.sender);
 
-        // FHE comparison: approved iff score >= threshold (result: 0 or 1)
-        ebool  approvedBool = FHE.gte(score, FHE.asEuint32(threshold));
-        // Store as euint32 so the 3-step on-chain reveal flow works uniformly
-        euint32 approvedInt = FHE.asEuint32(approvedBool);
+        ebool   approvedBool = FHE.gte(score, FHE.asEuint32(threshold));
+        euint32 approvedInt  = FHE.asEuint32(approvedBool);
 
         FHE.allowThis(approvedInt);
-        FHE.allow(approvedInt, lender);   // lender can decrypt
-        FHE.allowSender(approvedInt);     // borrower can also verify their own status
+        FHE.allow(approvedInt, lender);
+        FHE.allowSender(approvedInt);
 
-        _approvals[msg.sender][lender]           = approvedInt;
-        _approvalSet[msg.sender][lender]         = true;
-        _approvalThresholds[msg.sender][lender]  = threshold;
+        _approvals[msg.sender][lender]          = approvedInt;
+        _approvalSet[msg.sender][lender]        = true;
+        _approvalThresholds[msg.sender][lender] = threshold;
 
         emit LenderApprovalGranted(msg.sender, lender, threshold);
     }
 
-    /**
-     * @notice Step 1 of on-chain reveal: allow the approval to be publicly decrypted.
-     * Call this before initiating `decryptForTx` in the CoFHE SDK.
-     */
+    /** @notice Step 2 of approval reveal: permit public decryption. */
     function allowApprovalPublic(address lender) external requiresData(msg.sender) {
         require(_approvalSet[msg.sender][lender], "CreditScoreRegistry: no approval set");
         FHE.allowPublic(_approvals[msg.sender][lender]);
     }
 
-    /**
-     * @notice Step 3 of on-chain reveal: submit the threshold-network decryption result.
-     * @param borrower  The borrower whose approval is being revealed
-     * @param lender    The lender the approval was issued to
-     * @param plaintext 0 (denied) or 1 (approved)
-     * @param signature Threshold-network signature over the plaintext
-     */
+    /** @notice Step 3 of approval reveal: submit CoFHE threshold-network signature. */
     function publishApprovalResult(
-        address borrower,
-        address lender,
-        uint32  plaintext,
+        address        borrower,
+        address        lender,
+        uint32         plaintext,
         bytes calldata signature
     ) external {
         require(_approvalSet[borrower][lender], "CreditScoreRegistry: no approval set");
@@ -183,13 +193,67 @@ contract CreditScoreRegistry {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  Lender / lending pool actions
+    //  Borrower actions — dynamic interest rate
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * @notice Read the encrypted approval handle the borrower granted this lender.
-     * Only callable by the authorised lender; decrypt via CoFHE SDK.
+     * @notice Compute the caller's personalised rate entirely in FHE.
+     *
+     * FHE trick — avoid underflow when score < threshold:
+     *   aboveThresh = (score >= threshold) ? 1 : 0      (encrypted)
+     *   rawExcess   = score - threshold                  (wraps if below, but...)
+     *   safeExcess  = rawExcess * aboveThresh            (...zeroed out when below)
+     *   discount    = safeExcess * DISCOUNT_NUM
+     *   rateScaled  = BASE_RATE_SCALED - discount        (range: 24000–45000)
+     *
+     * rateBps = rateScaled / RATE_SCALE   (applied at reveal, off-chain)
      */
+    function computePersonalRate() external requiresData(msg.sender) {
+        euint32 score = _scoreValid[msg.sender]
+            ? _scores[msg.sender]
+            : _recomputeScore(msg.sender);
+
+        euint32 aboveThresh = FHE.asEuint32(FHE.gte(score, FHE.asEuint32(MIN_CREDIT_THRESHOLD)));
+        euint32 rawExcess   = FHE.sub(score, FHE.asEuint32(MIN_CREDIT_THRESHOLD));
+        euint32 safeExcess  = FHE.mul(rawExcess, aboveThresh);
+        euint32 discount    = FHE.mul(safeExcess, FHE.asEuint32(DISCOUNT_NUM));
+        euint32 rateScaled  = FHE.sub(FHE.asEuint32(BASE_RATE_SCALED), discount);
+
+        FHE.allowThis(rateScaled);
+        FHE.allowSender(rateScaled);
+
+        _encRates[msg.sender]  = rateScaled;
+        _rateValid[msg.sender] = true;
+
+        emit PersonalRateComputed(msg.sender);
+    }
+
+    /** @notice Step 2 of rate reveal: permit public decryption. */
+    function allowRatePublic() external {
+        require(_rateValid[msg.sender], "CreditScoreRegistry: no rate computed");
+        FHE.allowPublic(_encRates[msg.sender]);
+    }
+
+    /**
+     * @notice Step 3 of rate reveal: submit CoFHE threshold-network signature.
+     *         Divides rateScaled by RATE_SCALE to store final bps value.
+     */
+    function publishRateResult(
+        address        borrower,
+        uint256        rateScaled,
+        bytes calldata signature
+    ) external {
+        require(_rateValid[borrower], "CreditScoreRegistry: no rate computed");
+        FHE.publishDecryptResult(_encRates[borrower], rateScaled, signature);
+        _revealedRates[borrower] = uint32(rateScaled / RATE_SCALE);
+        _rateRevealed[borrower]  = true;
+        emit PersonalRateRevealed(borrower, _revealedRates[borrower]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Lender / pool reads
+    // ─────────────────────────────────────────────────────────────────────────
+
     function getLenderApproval(address borrower)
         external
         view
@@ -202,10 +266,6 @@ contract CreditScoreRegistry {
         return _approvals[borrower][msg.sender];
     }
 
-    /**
-     * @notice Read the on-chain-revealed approval result after the 3-step flow.
-     * Returns true if approved, false if denied.
-     */
     function getRevealedApproval(address borrower, address lender)
         external
         view
@@ -215,6 +275,25 @@ contract CreditScoreRegistry {
         (uint256 value, bool decrypted) = FHE.getDecryptResultSafe(_approvals[borrower][lender]);
         require(decrypted, "CreditScoreRegistry: approval not yet revealed on-chain");
         return value == 1;
+    }
+
+    function getRevealedRate(address borrower) external view returns (uint32) {
+        require(_rateRevealed[borrower], "CreditScoreRegistry: rate not revealed");
+        return _revealedRates[borrower];
+    }
+
+    function isRateRevealed(address borrower) external view returns (bool) {
+        return _rateRevealed[borrower];
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Caller's own encrypted handles (for SDK decryptForTx)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** @notice Returns the encrypted rate handle so the borrower can initiate SDK decryption. */
+    function getMyRateHandle() external view returns (euint32) {
+        require(_rateValid[msg.sender], "CreditScoreRegistry: no rate computed");
+        return _encRates[msg.sender];
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -241,19 +320,12 @@ contract CreditScoreRegistry {
     //  Internal
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * @dev Weighted score computed entirely in FHE:
-     *      score = encBalance*25 + encTxFreq*20 + encRepayment*40 + (100-encDebtRatio)*15
-     *      Maximum = 10 000 (perfect credit across all four signals)
-     */
     function _recomputeScore(address borrower) internal returns (euint32) {
         CreditData storage d = _data[borrower];
 
         euint32 balScore  = FHE.mul(d.encBalance,   FHE.asEuint32(W_BALANCE));
         euint32 txScore   = FHE.mul(d.encTxFreq,    FHE.asEuint32(W_TX_FREQ));
         euint32 repScore  = FHE.mul(d.encRepayment, FHE.asEuint32(W_REPAYMENT));
-
-        // Low debt = high score: invert debtRatio before weighting
         euint32 invDebt   = FHE.sub(FHE.asEuint32(100), d.encDebtRatio);
         euint32 debtScore = FHE.mul(invDebt, FHE.asEuint32(W_DEBT));
 

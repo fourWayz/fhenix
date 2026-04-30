@@ -6,6 +6,20 @@ import "./CreditScoreRegistry.sol";
 /**
  * @title CreditTierNFT
  * @notice Soul-bound ERC-721 that encodes an on-chain credit tier (Gold / Silver / Bronze).
+ *
+ * Tier is derived from the already-revealed personal interest rate in CreditScoreRegistry:
+ *   Gold   — rate ≤ 10.33 % (score ≥ ~9 000)
+ *   Silver — rate ≤ 13.83 % (score ≥ ~7 500)
+ *   Bronze — rate <  15.00 % (score ≥  7 000 — any credit-approved borrower)
+ *
+ * Because the rate is computed by FHE from encrypted inputs, the NFT proves credit
+ * quality without ever revealing the underlying score or financial signals.
+ *
+ * Soul-bound: transfers are blocked — the NFT is identity-bound to the minter.
+ *
+ * Cross-protocol integration:
+ *   Any protocol can call balanceOf(borrower) > 0 or getTier(borrower) to gate access
+ *   without any direct CoFHE dependency.
  */
 contract CreditTierNFT {
 
@@ -105,23 +119,23 @@ contract CreditTierNFT {
     // ─────────────────────────────────────────────────────────────────────────
 
     function transferFrom(address, address, uint256) external pure {
-        revert("CreditTierNFT: soul-bound — non-transferable");
+        revert("CreditTierNFT: soul-bound - non-transferable");
     }
 
     function safeTransferFrom(address, address, uint256) external pure {
-        revert("CreditTierNFT: soul-bound — non-transferable");
+        revert("CreditTierNFT: soul-bound - non-transferable");
     }
 
     function safeTransferFrom(address, address, uint256, bytes calldata) external pure {
-        revert("CreditTierNFT: soul-bound — non-transferable");
+        revert("CreditTierNFT: soul-bound - non-transferable");
     }
 
     function approve(address, uint256) external pure {
-        revert("CreditTierNFT: soul-bound — non-transferable");
+        revert("CreditTierNFT: soul-bound - non-transferable");
     }
 
     function setApprovalForAll(address, bool) external pure {
-        revert("CreditTierNFT: soul-bound — non-transferable");
+        revert("CreditTierNFT: soul-bound - non-transferable");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -196,7 +210,7 @@ contract CreditTierNFT {
         return string(abi.encodePacked(
             'data:application/json;charset=utf-8,',
             '{"name":"CipherCredit ', n, '",',
-            '"description":"Soul-bound on-chain credit tier. Score never revealed — computed privately by FHE.",',
+            '"description":"Soul-bound on-chain credit tier. Score never revealed - computed privately by FHE.",',
             '"image":"data:image/svg+xml;charset=utf-8,', svg, '",',
             '"attributes":[',
               '{"trait_type":"Tier","value":"', n, '"},',
