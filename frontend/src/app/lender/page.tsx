@@ -93,7 +93,8 @@ export default function LenderPage() {
     }
   }
 
-  const fmt = (v: bigint | undefined) => v ? formatEther(v) : '—'
+  const fmt = (v: bigint | undefined) =>
+    v != null ? parseFloat(formatEther(v)).toFixed(6).replace(/\.?0+$/, '') : '—'
 
   return (
     <div className="space-y-8">
