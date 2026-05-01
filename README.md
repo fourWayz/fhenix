@@ -3,6 +3,8 @@
 > Privacy-preserving DeFi credit scoring built on [Fhenix CoFHE](https://docs.fhenix.io).  
 > Lenders see only **pass or fail** — never your balances, history, or numeric score.
 
+**[Live Demo →](https://cipher-credit.vercel.app/)**
+
 ---
 
 ## The Problem
@@ -44,8 +46,9 @@ score = balance×25 + txFrequency×20 + repaymentHistory×40 + (100−debtRatio)
 
 | Contract | Description |
 |---|---|
-| `CreditScoreRegistry.sol` | Stores encrypted signals, computes FHE weighted score, manages lender approvals |
-| `LendingPool.sol` | Under-collateralised lending pool; reads on-chain-revealed approval |
+| `CreditScoreRegistry.sol` | Stores encrypted signals, computes FHE weighted score, manages lender approvals and personal rate |
+| `LendingPool.sol` | Under-collateralised lending pool; reads on-chain-revealed approval and rate |
+| `CreditTierNFT.sol` | Soul-bound ERC-721 encoding Bronze / Silver / Gold tier from revealed rate; on-chain SVG |
 
 ### Score computation (all in FHE)
 
@@ -78,7 +81,8 @@ fhenix/
 ├── cofhe-hardhat-starter/          # Contracts, tasks, tests
 │   ├── contracts/
 │   │   ├── CreditScoreRegistry.sol
-│   │   └── LendingPool.sol
+│   │   ├── LendingPool.sol
+│   │   └── CreditTierNFT.sol
 │   ├── tasks/
 │   │   ├── deploy-credit.ts
 │   │   ├── submit-credit-data.ts
@@ -89,7 +93,7 @@ fhenix/
     └── src/
         ├── app/
         │   ├── layout.tsx
-        │   ├── page.tsx            # Home (server component)
+        │   ├── page.tsx            # Home
         │   ├── borrower/page.tsx   # Borrower dashboard
         │   └── lender/page.tsx     # Lender dashboard
         ├── components/
@@ -98,8 +102,10 @@ fhenix/
         │   └── ConnectWallet.tsx
         ├── hooks/
         │   ├── useCofhe.ts         # CoFHE SDK client lifecycle
-        │   ├── useCreditScore.ts   # Encrypt, submit, grant approval
-        │   └── useLendingPool.ts   # Deposit, borrow, repay
+        │   ├── useCreditScore.ts   # Encrypt, submit, rate reveal
+        │   ├── useLendingPool.ts   # Deposit, borrow, repay
+        │   ├── useCreditNFT.ts     # Tier NFT mint and reads
+        │   └── useAutoSignals.ts   # On-chain signal fetching
         ├── abis/                   # Typed contract ABIs
         └── config.ts               # Chain + contract addresses
 ```
@@ -162,8 +168,9 @@ After deploying, update [frontend/src/config.ts](frontend/src/config.ts) with th
 
 | Contract | Address |
 |---|---|
-| `CreditScoreRegistry` | [`0xfbf61a33ab9eA16D7191d68298D0298B6e62b61c`](https://sepolia.arbiscan.io/address/0xfbf61a33ab9eA16D7191d68298D0298B6e62b61c) |
-| `LendingPool` | [`0xAc5Ee2Aff86732530Ee83B7448bcDAd82811aCF0`](https://sepolia.arbiscan.io/address/0xAc5Ee2Aff86732530Ee83B7448bcDAd82811aCF0) |
+| `CreditScoreRegistry` | [`0x6C0E2b4C44ed9F3ED057a2fdF1dE4c53Ec997567`](https://sepolia.arbiscan.io/address/0x6C0E2b4C44ed9F3ED057a2fdF1dE4c53Ec997567) |
+| `LendingPool` | [`0xa646663c7D269363c62198EFb1d69Fc1d24e298B`](https://sepolia.arbiscan.io/address/0xa646663c7D269363c62198EFb1d69Fc1d24e298B) |
+| `CreditTierNFT` | [`0x7b5353c1c76f0fBdF40000DF272Ee81A3e9b7C9F`](https://sepolia.arbiscan.io/address/0x7b5353c1c76f0fBdF40000DF272Ee81A3e9b7C9F) |
 
 ---
 
