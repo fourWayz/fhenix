@@ -1,5 +1,5 @@
 
-export const CreditScoreRegistryABI =[
+export const CreditScoreRegistryABI = [
     {
       "inputs": [
         {
@@ -528,22 +528,12 @@ export const CreditScoreRegistryABI =[
     {
       "inputs": [
         {
-          "internalType": "address",
-          "name": "borrower",
-          "type": "address"
-        },
-        {
-          "internalType": "uint256",
-          "name": "rateScaled",
-          "type": "uint256"
-        },
-        {
-          "internalType": "bytes",
-          "name": "signature",
-          "type": "bytes"
+          "internalType": "uint32",
+          "name": "rateBps",
+          "type": "uint32"
         }
       ],
-      "name": "publishRateResult",
+      "name": "setPersonalRateDirect",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -660,6 +650,13 @@ export const CreditScoreRegistryABI =[
         }
       ],
       "name": "submitCreditData",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "syncRateFromOracle",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"

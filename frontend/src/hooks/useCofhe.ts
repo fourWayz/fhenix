@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
+// createCofheConfig / createCofheClient live in the /web entry (browser build with IndexedDB + workers)
 import { createCofheConfig, createCofheClient } from '@cofhe/sdk/web'
 import { Encryptable, FheTypes } from '@cofhe/sdk'
 import type { CofheClient } from '@cofhe/sdk'
@@ -73,10 +74,11 @@ export function useCofhe() {
   )
 
   // Decrypt a handle for a tx — returns plaintext + threshold-network signature
+  // Use this before calling publishRateResult / publishApprovalResult on-chain
   const decryptForTx = useCallback(
     async (handle: bigint) => {
       if (!client) throw new Error('CoFHE client not ready')
-      return client.decryptForTx(handle).withoutPermit().execute()
+      return client.decryptForTx(handle).withPermit().execute()
     },
     [client],
   )

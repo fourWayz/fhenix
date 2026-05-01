@@ -5,9 +5,9 @@ type Addresses = { registry: `0x${string}`; pool: `0x${string}`; nft: `0x${strin
 export const CONTRACT_ADDRESSES: Record<number, Addresses> = {
   // Arbitrum Sepolia (chainId 421614)
   [arbitrumSepolia.id]: {
-    registry: '0xDe6615E28a8F413Dd2728a3A0156bF7efF2A974C',
-    pool:     '0x099f850Cbb05b45E83DA34ED93855fdF88260991',
-    nft:      '0x3Eed4f826CBF1FE513EcC1369CCfd2388A668697', // set after redeploy
+    registry: '0x6C0E2b4C44ed9F3ED057a2fdF1dE4c53Ec997567',
+    pool:     '0xa646663c7D269363c62198EFb1d69Fc1d24e298B',
+    nft:      '0x7b5353c1c76f0fBdF40000DF272Ee81A3e9b7C9F',
   },
   // Base Sepolia (chainId 84532)
   [baseSepolia.id]: {
@@ -20,3 +20,5 @@ export const CONTRACT_ADDRESSES: Record<number, Addresses> = {
 export const SUPPORTED_CHAINS = [arbitrumSepolia, baseSepolia] as const
 
 export const MIN_CREDIT_THRESHOLD = 7_000
+export const BASE_RATE_BPS        = 1_500   // 15.00%
+export const MIN_RATE_BPS         =   800   // 8.00%

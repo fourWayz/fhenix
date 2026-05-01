@@ -1,4 +1,4 @@
-export const LendingPoolABI = [
+export const LendingPoolABI =  [
     {
       "inputs": [
         {
@@ -55,6 +55,12 @@ export const LendingPoolABI = [
           "internalType": "uint256",
           "name": "collateral",
           "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint32",
+          "name": "interestRateBps",
+          "type": "uint32"
         }
       ],
       "name": "LoanIssued",
@@ -73,6 +79,12 @@ export const LendingPoolABI = [
           "indexed": false,
           "internalType": "uint256",
           "name": "principal",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "interest",
           "type": "uint256"
         }
       ],
@@ -97,6 +109,19 @@ export const LendingPoolABI = [
       ],
       "name": "Withdrawn",
       "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "BASE_RATE_BPS",
+      "outputs": [
+        {
+          "internalType": "uint32",
+          "name": "",
+          "type": "uint32"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
     },
     {
       "inputs": [],
@@ -185,6 +210,25 @@ export const LendingPoolABI = [
       "inputs": [
         {
           "internalType": "address",
+          "name": "borrower",
+          "type": "address"
+        }
+      ],
+      "name": "getAccruedInterest",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
           "name": "",
           "type": "address"
         }
@@ -215,6 +259,11 @@ export const LendingPoolABI = [
           "internalType": "uint256",
           "name": "issuedAt",
           "type": "uint256"
+        },
+        {
+          "internalType": "uint32",
+          "name": "interestRateBps",
+          "type": "uint32"
         }
       ],
       "stateMutability": "view",
@@ -306,6 +355,25 @@ export const LendingPoolABI = [
     {
       "inputs": [],
       "name": "totalDeposited",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "borrower",
+          "type": "address"
+        }
+      ],
+      "name": "totalRepaymentDue",
       "outputs": [
         {
           "internalType": "uint256",

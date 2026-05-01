@@ -9,7 +9,7 @@
     "lint":    "next lint"
   },
   "dependencies": {
-    "@cofhe/sdk":               "^0.4.0",
+    "@cofhe/sdk":               "^0.5.1",
     "@tanstack/react-query":    "^5.62.0",
     "next":                     "^15.3.0",
     "react":                    "^19.0.0",

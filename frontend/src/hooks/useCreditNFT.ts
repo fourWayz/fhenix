@@ -69,10 +69,13 @@ export function useCreditNFT() {
   const gasFees = useCallback(async () => {
     if (!publicClient) return {}
     const fees = await publicClient.estimateFeesPerGas()
-    const bump = (v: bigint) => (v * 130n) / 100n
+    const fee = fees.maxFeePerGas ?? 0n
+    const tip = (fees.maxPriorityFeePerGas != null && fees.maxPriorityFeePerGas > 0n)
+      ? fees.maxPriorityFeePerGas
+      : fee > 0n ? fee / 10n : 1_000_000n
     return {
-      maxFeePerGas:         bump(fees.maxFeePerGas         ?? 0n),
-      maxPriorityFeePerGas: bump(fees.maxPriorityFeePerGas ?? 0n),
+      ...(fee > 0n ? { maxFeePerGas: fee } : {}),
+      maxPriorityFeePerGas: tip,
     }
   }, [publicClient])
 
